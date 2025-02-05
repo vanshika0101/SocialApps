@@ -1,11 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, Image, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Image, TextInput, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import firestore from '@react-native-firebase/firestore';
 import { useSelector } from 'react-redux';
 import RBSheet from 'react-native-raw-bottom-sheet';
-import { useRoute, useNavigation } from '@react-navigation/native';
+import { useNavigation, CommonActions } from '@react-navigation/native';
 import { toggleTheme } from '../App';  // Import the toggleTheme function
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { logout } from './authSlice';
+import { useDispatch } from 'react-redux';
 
 const FeedScreen = () => {
     const [posts, setPosts] = useState([]);
@@ -13,12 +16,36 @@ const FeedScreen = () => {
     const [commentText, setCommentText] = useState('');
     const userId = useSelector(state => state.auth.userId); // Get logged-in user ID
     const bottomSheetRef = useRef(null);
-    const route = useRoute();
-    const { name } = route.params || {};
     const navigation = useNavigation();
     const [isDarkTheme, setIsDarkTheme] = useState(false); // Theme state for FeedScreen
+    const dispatch = useDispatch();  // Get the dispatch function from Redux
 
-    console.log(name);
+
+    const [name, setName] = useState('');
+    const [profilepic, setProfilepic] = useState('');
+
+    useEffect(() => {
+        const fetchUserDetails = async () => {
+            try {
+                const userDoc = await firestore()
+                    .collection('users')
+                    .doc(userId)
+                    .get();
+                    console.log(userDoc.data().profilepic,"<<<<<<<<");
+                    
+
+                if (userDoc.exists) {
+                    setName(userDoc.data().name || '');  // Store name in state
+                    setProfilepic(userDoc.data().profilepic || '');
+                }
+            } catch (error) {
+                console.error("Error fetching user details:", error);
+            }
+        };
+
+        if (userId) fetchUserDetails();
+    }, [userId]);
+
 
     useEffect(() => {
         const unsubscribe = firestore()
@@ -31,6 +58,25 @@ const FeedScreen = () => {
 
         return () => unsubscribe();
     }, []);
+    const handleLogout = async () => {
+        try {
+            await GoogleSignin.configure(); // Ensure Google Sign-In is configured before signing out
+            await GoogleSignin.signOut();
+
+            Alert.alert('Logged Out', 'You have been logged out.');
+            dispatch(logout());
+
+            navigation.dispatch(
+                CommonActions.reset({
+                    index: 0,
+                    routes: [{ name: 'Login' }],
+                })
+            );
+        } catch (error) {
+            console.error('Logout Error:', error);
+            Alert.alert('Error', 'Failed to log out. Please try again.');
+        }
+    };
 
     const sendNotification = async (receiverId, title, body) => {
         const userDoc = await firestore().collection('users').doc(receiverId).get();
@@ -40,8 +86,8 @@ const FeedScreen = () => {
         if (!fcmToken) return;
 
         const message = {
-            
-            
+
+
             to: fcmToken,
             notification: {
                 title,
@@ -56,7 +102,7 @@ const FeedScreen = () => {
 
         try {
             console.log("<<<<<<<<<<");
-            
+
             await fetch('https://fcm.googleapis.com/fcm/send', {
                 method: 'POST',
                 headers: {
@@ -64,10 +110,10 @@ const FeedScreen = () => {
                     'Authorization': 'key=bf79f7db6ca2be8bbcceec8f637455c27319a1fc',
                 },
                 body: JSON.stringify(message),
-                
+
             });
-            console.log(">>>>>>>>>>>>>",body);
-            
+            console.log(">>>>>>>>>>>>>", body);
+
         } catch (error) {
             console.error('Error sending FCM notification:', error);
         }
@@ -85,8 +131,8 @@ const FeedScreen = () => {
 
         if (!isLiked) {
             sendNotification(selectedPost.userId, 'New Like!', `${name} commented on your post.`);
-            console.log(sendNotification,"<<<<<<<<<<");
-            
+            console.log(sendNotification, "<<<<<<<<<<");
+
         }
     };
 
@@ -97,31 +143,33 @@ const FeedScreen = () => {
     };
 
     const addComment = async () => {
+        console.log("addComment function triggered");  // Check if the function is called
         if (!commentText.trim()) return;
-
+    
         const postRef = firestore().collection('posts').doc(selectedPost.id);
         const newComment = {
             userId,
             text: commentText,
-            timestamp: new Date(),
+            // timestamp: new Date(),
             userName: name,
+            profilepic: profilepic,
         };
-
+    
+        console.log('New Comment:', newComment);  // Should log new comment details
+    
         await postRef.update({
             comments: [...selectedPost.comments, newComment]
         });
-
+    
         setSelectedPost(prev => ({
             ...prev,
             comments: [...prev.comments, newComment]
         }));
-
+    
         setCommentText('');
         sendNotification(selectedPost.userId, 'New Comment!', `${name} commented on your post.`);
     };
-
-    // Add a comment
-
+    
     const renderItem = ({ item }) => (
         <View style={[styles.card, { backgroundColor: isDarkTheme ? '#333' : '#fff' }]}>
             {item.image ? (
@@ -181,11 +229,16 @@ const FeedScreen = () => {
 
                         renderItem={({ item }) => (
                             <View style={[styles.comment, { backgroundColor: isDarkTheme ? '#333' : '#fff' }]}>
+                                <Image
+                                    source={{ uri: item.profilepic }} // Assuming you have the URL of the profile picture in item.profilePicUrl
+                                    style={[styles.profilePic, { borderColor: isDarkTheme ? '#fff' : '#333' }]}
+                                />
+
                                 <Text style={[styles.commentText, { color: isDarkTheme ? '#fff' : '#333' }]}>{item.userName}</Text>
                                 <Text style={[styles.commentText, { color: isDarkTheme ? '#fff' : '#333' }]}>{item.text}</Text>
-                                <Text style={[styles.timestamp, { color: isDarkTheme ? '#ccc' : 'gray' }]}>
+                                {/* <Text style={[styles.timestamp, { color: isDarkTheme ? '#ccc' : 'gray' }]}>
                                     {item.timestamp ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'No timestamp'}
-                                </Text>
+                                </Text> */}
                             </View>
                         )}
                     />
@@ -193,6 +246,7 @@ const FeedScreen = () => {
                         <TextInput
                             style={styles.commentInput}
                             placeholder="Write a comment..."
+                            placeholderTextColor={'grey'}
                             value={commentText}
                             onChangeText={setCommentText}
                         />
@@ -202,15 +256,18 @@ const FeedScreen = () => {
                     </View>
                 </View>
             </RBSheet>
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                <Icon name="log-out-outline" size={24} color="#fff" />
+            </TouchableOpacity>
 
             {/* Toggle Theme Button */}
             <TouchableOpacity
-                style={styles.toggleButton}
+                style={[styles.toggleButton, { backgroundColor: isDarkTheme ? '#222' : '#f8f8f8' }]}
                 onPress={() => {
                     toggleTheme(setIsDarkTheme);  // Toggle theme
                 }}
             >
-                <Text style={styles.toggleButtonText}>{isDarkTheme ? 'Switch to Light' : 'Switch to Dark'}</Text>
+                <Icon name={isDarkTheme ? "moon-outline" : "sunny-outline"} size={24} color="blue" />
             </TouchableOpacity>
         </View>
     );
@@ -308,9 +365,9 @@ const styles = StyleSheet.create({
     },
     toggleButton: {
         position: 'absolute',
-        top: 20,
+        bottom: 80,
         right: 20,
-        backgroundColor: '#007AFF',
+
         paddingVertical: 10,
         paddingHorizontal: 15,
         borderRadius: 5,
@@ -320,6 +377,28 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
     },
+    logoutButton: {
+        position: 'absolute',
+        bottom: 150, // Positioned above the toggle button
+        right: 25,
+        backgroundColor: '#FF3B30',
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 5,
+    },
+    profilePic: {
+        width: 40,
+        height: 40,
+        borderRadius: 20, // Circular image
+        marginRight: 10, // Space between profile image and text
+        borderWidth: 2, // Optional: add border to the profile image
+    },
+
+
 });
 
 export default FeedScreen;
+
